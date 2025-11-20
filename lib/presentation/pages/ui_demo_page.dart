@@ -6,6 +6,7 @@ import 'demo_login_page.dart';
 import 'warehouse_management_page.dart';
 import 'store_management_page.dart';
 import 'product_management_page.dart';
+import 'admin_panel_page.dart';
 
 // Modelo de datos de demostración
 class DemoProduct {
@@ -1338,16 +1339,9 @@ class _UIDemoPageState extends State<UIDemoPage> {
                     title: 'Panel de Administración',
                     onTap: () {
                       Navigator.of(context).pop();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Row(
-                            children: [
-                              Icon(Icons.construction, color: Colors.white),
-                              SizedBox(width: 8),
-                              Text('Panel de administración en desarrollo'),
-                            ],
-                          ),
-                          backgroundColor: Colors.orange,
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const AdminPanelPage(),
                         ),
                       );
                     },

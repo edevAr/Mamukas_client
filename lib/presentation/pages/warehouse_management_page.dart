@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../widgets/widgets.dart';
+import 'warehouse_detail_page.dart';
+import 'product_management_page.dart';
 
 class WarehouseManagementPage extends StatefulWidget {
   const WarehouseManagementPage({super.key});
@@ -36,144 +38,11 @@ class _WarehouseManagementPageState extends State<WarehouseManagementPage> {
     return filtered;
   }
 
-  void _filterWarehouses(String query) {
-    setState(() {
-      if (query.isEmpty) {
-        _filteredWarehouses = _warehouses;
-      } else {
-        _filteredWarehouses = _warehouses
-            .where((warehouse) => 
-                warehouse.name.toLowerCase().contains(query.toLowerCase()) ||
-                warehouse.location.toLowerCase().contains(query.toLowerCase()))
-            .toList();
-      }
-    });
-  }
-
   void _showWarehouseDetail(Warehouse warehouse) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-        
-        return Container(
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[400],
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: warehouse.color.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Icon(
-                    warehouse.icon,
-                    size: 40,
-                    color: warehouse.color,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  warehouse.name,
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  warehouse.location,
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _buildStatItem('Productos', warehouse.productCount.toString()),
-                    _buildStatItem('Estado', warehouse.isActive ? 'Activo' : 'Inactivo'),
-                    _buildStatItem('Capacidad', '${warehouse.capacity}%'),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Gestionando ${warehouse.name}'),
-                          duration: const Duration(milliseconds: 2000),
-                        ),
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF007AFF),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text(
-                      'Gestionar Almacén',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildStatItem(String label, String value) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF007AFF),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey[600],
-          ),
-        ),
-      ],
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => WarehouseDetailPage(warehouse: warehouse),
+      ),
     );
   }
 
@@ -332,6 +201,582 @@ class _WarehouseManagementPageState extends State<WarehouseManagementPage> {
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showCreateWarehouseForm,
+        backgroundColor: const Color(0xFF007AFF),
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
+    );
+  }
+
+  void _showCreateWarehouseForm() {
+    final formKey = GlobalKey<FormState>();
+    final nameController = TextEditingController();
+    final locationController = TextEditingController();
+    final productCountController = TextEditingController();
+    final capacityController = TextEditingController();
+    final quantityController = TextEditingController(text: '0');
+    final productSearchController = TextEditingController();
+
+    // Obtener lista de productos para el autocompletado
+    final products = Product.sampleProducts();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        bool isActive = true;
+        IconData selectedIcon = Icons.warehouse_outlined;
+        Color selectedColor = Colors.blue;
+        String selectedUnit = 'unidades'; // 'unidades', 'cajas', 'paquetes'
+        Product? _selectedProduct; // Producto seleccionado (puede usarse para validación o guardado)
+        
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.9,
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom,
+                ),
+                child: Column(
+                  children: [
+                    // Handle bar
+                    Container(
+                      margin: const EdgeInsets.only(top: 12, bottom: 8),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[400],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    
+                    // Title
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Nuevo Almacén',
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
+                        ],
+                      ),
+                    ),
+                    
+                    // Form
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Form(
+                          key: formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildTextField(
+                                controller: nameController,
+                                label: 'Nombre',
+                                icon: Icons.warehouse_outlined,
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) {
+                                    return 'El nombre es requerido';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 16),
+                              _buildTextField(
+                                controller: locationController,
+                                label: 'Ubicación',
+                                icon: Icons.location_on_outlined,
+                                maxLines: 2,
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) {
+                                    return 'La ubicación es requerida';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 16),
+                              
+                              // Combobox y buscador de productos
+                              Row(
+                                children: [
+                                  Expanded(
+                                    flex: 2,
+                                    child: _buildUnitDropdown(
+                                      value: selectedUnit,
+                                      onChanged: (value) {
+                                        setModalState(() {
+                                          selectedUnit = value!;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    flex: 3,
+                                    child: _buildProductSearchField(
+                                      controller: productSearchController,
+                                      products: products,
+                                      onProductSelected: (product) {
+                                        setModalState(() {
+                                          _selectedProduct = product;
+                                          productSearchController.text = product.name;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              
+                              // Botones de incremento/decremento y campo de cantidad
+                              Row(
+                                children: [
+                                  // Botón menos
+                                  IconButton(
+                                    onPressed: () {
+                                      final currentValue = int.tryParse(quantityController.text) ?? 0;
+                                      if (currentValue > 0) {
+                                        setModalState(() {
+                                          quantityController.text = (currentValue - 1).toString();
+                                        });
+                                      }
+                                    },
+                                    icon: const Icon(Icons.remove_circle_outline),
+                                    iconSize: 32,
+                                    color: const Color(0xFF007AFF),
+                                  ),
+                                  // Botón más
+                                  IconButton(
+                                    onPressed: () {
+                                      final currentValue = int.tryParse(quantityController.text) ?? 0;
+                                      setModalState(() {
+                                        quantityController.text = (currentValue + 1).toString();
+                                      });
+                                    },
+                                    icon: const Icon(Icons.add_circle_outline),
+                                    iconSize: 32,
+                                    color: const Color(0xFF007AFF),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // Campo de texto editable
+                                  Expanded(
+                                    child: TextFormField(
+                                      controller: quantityController,
+                                      keyboardType: TextInputType.number,
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                        color: isDark ? Colors.white : Colors.black87,
+                                      ),
+                                      decoration: InputDecoration(
+                                        filled: true,
+                                        fillColor: isDark ? const Color(0xFF2C2C2E) : Colors.grey[100],
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                          borderSide: BorderSide.none,
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                          borderSide: BorderSide(
+                                            color: isDark ? Colors.grey[800]! : Colors.grey[300]!,
+                                          ),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                          borderSide: const BorderSide(
+                                            color: Color(0xFF007AFF),
+                                            width: 2,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // Etiqueta de unidad
+                                  Text(
+                                    selectedUnit,
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                      color: isDark ? Colors.white70 : Colors.grey[700],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _buildTextField(
+                                      controller: productCountController,
+                                      label: 'Cantidad de Productos',
+                                      icon: Icons.inventory_2_outlined,
+                                      keyboardType: TextInputType.number,
+                                      validator: (value) {
+                                        if (value == null || value.isEmpty) {
+                                          return 'La cantidad es requerida';
+                                        }
+                                        if (int.tryParse(value) == null || int.parse(value) < 0) {
+                                          return 'Cantidad inválida';
+                                        }
+                                        return null;
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: _buildTextField(
+                                      controller: capacityController,
+                                      label: 'Capacidad (%)',
+                                      icon: Icons.storage_outlined,
+                                      keyboardType: TextInputType.number,
+                                      validator: (value) {
+                                        if (value == null || value.isEmpty) {
+                                          return 'La capacidad es requerida';
+                                        }
+                                        final capacity = int.tryParse(value);
+                                        if (capacity == null || capacity < 0 || capacity > 100) {
+                                          return 'Capacidad inválida (0-100)';
+                                        }
+                                        return null;
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              _buildStatusSwitch(
+                                value: isActive,
+                                onChanged: (value) {
+                                  setModalState(() {
+                                    isActive = value;
+                                  });
+                                },
+                              ),
+                              const SizedBox(height: 24),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    
+                    // Save button
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            if (formKey.currentState!.validate()) {
+                              // Usar _selectedProduct para validación futura si es necesario
+                              // Por ahora se guarda el almacén sin validar producto específico
+                              final newWarehouse = Warehouse(
+                                name: nameController.text.trim(),
+                                location: locationController.text.trim(),
+                                icon: selectedIcon,
+                                color: selectedColor,
+                                productCount: int.parse(productCountController.text),
+                                isActive: isActive,
+                                capacity: int.parse(capacityController.text),
+                              );
+                              
+                              // El producto seleccionado y la cantidad pueden usarse aquí
+                              // Ejemplo: _selectedProduct?.name, quantityController.text, selectedUnit
+                              
+                              setState(() {
+                                _warehouses.add(newWarehouse);
+                                _filteredWarehouses = _warehouses;
+                              });
+                              
+                              Navigator.of(context).pop();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Almacén creado exitosamente'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF007AFF),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'Guardar',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    TextInputType? keyboardType,
+    int maxLines = 1,
+    String? Function(String?)? validator,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      maxLines: maxLines,
+      validator: validator,
+      style: TextStyle(
+        color: isDark ? Colors.white : Colors.black87,
+      ),
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, size: 20),
+        filled: true,
+        fillColor: isDark ? const Color(0xFF2C2C2E) : Colors.grey[100],
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: isDark ? Colors.grey[800]! : Colors.grey[300]!,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+            color: Color(0xFF007AFF),
+            width: 2,
+          ),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+            color: Colors.red,
+            width: 1,
+          ),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+            color: Colors.red,
+            width: 2,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusSwitch({
+    required bool value,
+    required Function(bool) onChanged,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2C2C2E) : Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.warehouse_outlined,
+                size: 24,
+                color: value ? Colors.green : Colors.grey,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                value ? 'Activo' : 'Inactivo',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+            ],
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: const Color(0xFF007AFF),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUnitDropdown({
+    required String value,
+    required Function(String?) onChanged,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2C2C2E) : Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[800]! : Colors.grey[300]!,
+        ),
+      ),
+      child: DropdownButton<String>(
+        value: value,
+        isExpanded: true,
+        underline: const SizedBox(),
+        icon: Icon(Icons.arrow_drop_down, color: isDark ? Colors.white : Colors.black87),
+        style: TextStyle(
+          color: isDark ? Colors.white : Colors.black87,
+          fontSize: 16,
+        ),
+        items: const [
+          DropdownMenuItem(
+            value: 'unidades',
+            child: Text('Unidades'),
+          ),
+          DropdownMenuItem(
+            value: 'cajas',
+            child: Text('Cajas'),
+          ),
+          DropdownMenuItem(
+            value: 'paquetes',
+            child: Text('Paquetes'),
+          ),
+        ],
+        onChanged: onChanged,
+      ),
+    );
+  }
+
+  Widget _buildProductSearchField({
+    required TextEditingController controller,
+    required List<Product> products,
+    required Function(Product) onProductSelected,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Autocomplete<Product>(
+      optionsBuilder: (TextEditingValue textEditingValue) {
+        if (textEditingValue.text.isEmpty) {
+          return const Iterable<Product>.empty();
+        }
+        return products.where((product) =>
+            product.name.toLowerCase().contains(textEditingValue.text.toLowerCase()));
+      },
+      displayStringForOption: (Product product) => product.name,
+      onSelected: onProductSelected,
+      fieldViewBuilder: (
+        BuildContext context,
+        TextEditingController textEditingController,
+        FocusNode focusNode,
+        VoidCallback onFieldSubmitted,
+      ) {
+        return TextField(
+          controller: textEditingController,
+          focusNode: focusNode,
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+          decoration: InputDecoration(
+            labelText: 'Buscar Producto',
+            prefixIcon: const Icon(Icons.search, size: 20),
+            filled: true,
+            fillColor: isDark ? const Color(0xFF2C2C2E) : Colors.grey[100],
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: isDark ? Colors.grey[800]! : Colors.grey[300]!,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(
+                color: Color(0xFF007AFF),
+                width: 2,
+              ),
+            ),
+          ),
+        );
+      },
+      optionsViewBuilder: (
+        BuildContext context,
+        AutocompleteOnSelected<Product> onSelected,
+        Iterable<Product> options,
+      ) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4.0,
+            borderRadius: BorderRadius.circular(12),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 200),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: options.length,
+                itemBuilder: (BuildContext context, int index) {
+                  final product = options.elementAt(index);
+                  return ListTile(
+                    leading: Icon(
+                      product.icon,
+                      color: product.color,
+                    ),
+                    title: Text(product.name),
+                    subtitle: Text('${product.category} - \$${product.price.toStringAsFixed(2)}'),
+                    onTap: () {
+                      onSelected(product);
+                    },
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -345,6 +790,7 @@ class Warehouse {
   final int productCount;
   final bool isActive;
   final int capacity;
+  final List<String> images;
 
   Warehouse({
     required this.name,
@@ -354,6 +800,7 @@ class Warehouse {
     required this.productCount,
     required this.isActive,
     required this.capacity,
+    this.images = const [],
   });
 
   static List<Warehouse> sampleWarehouses() {
