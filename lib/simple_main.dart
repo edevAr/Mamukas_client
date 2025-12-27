@@ -30,10 +30,10 @@ class MamukaERPSimpleApp extends StatelessWidget {
             centerTitle: true,
             elevation: 2,
           ),
-          cardTheme: CardThemeData(
+          cardTheme: const CardThemeData(
             elevation: 4,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.all(Radius.circular(12)),
             ),
           ),
           inputDecorationTheme: InputDecorationTheme(
