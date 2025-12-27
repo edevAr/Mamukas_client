@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'dart:io' show Platform, NetworkInterface, InternetAddressType;
 import 'package:http/http.dart' as http;
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:universal_html/html.dart' as html;
 import '../../core/services/auth_service.dart';
 import '../../core/constants/api_constants.dart';
 
@@ -19,13 +18,20 @@ class _DemoLoginPageState extends State<DemoLoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _twoFactorCodeController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
+  bool _requiresTwoFactor = false;
+  String? _storedUsername;
+  String? _storedPassword;
+  String? _storedDevice;
+  String? _storedIp;
 
   @override
   void dispose() {
     _usernameController.dispose();
     _passwordController.dispose();
+    _twoFactorCodeController.dispose();
     super.dispose();
   }
 
@@ -128,6 +134,43 @@ class _DemoLoginPageState extends State<DemoLoginPage> {
           // Login exitoso
           final responseData = json.decode(response.body);
           
+          // Verificar si se requiere 2FA
+          if (responseData['requiresTwoFactor'] == true) {
+            // Guardar credenciales para verificación 2FA
+            setState(() {
+              _requiresTwoFactor = true;
+              _storedUsername = _usernameController.text.trim();
+              _storedPassword = _passwordController.text;
+              _storedDevice = device;
+              _storedIp = ip;
+              _isLoading = false;
+            });
+            
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(Icons.security, color: Colors.white),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        responseData['message'] ?? 'Ingresa tu código de autenticación de dos factores',
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 4),
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            );
+            return; // No navegar, mostrar campo 2FA
+          }
+          
           // Extraer accessToken del response
           final accessToken = responseData['accessToken'];
           
@@ -224,13 +267,11 @@ class _DemoLoginPageState extends State<DemoLoginPage> {
           errorMessage = 'Error de conexión: ${e.toString()}';
         }
         
-        print('Login error: $e');
-        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.error_outline, color: Colors.white),
+                const Icon(Icons.error, color: Colors.white),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
@@ -240,8 +281,174 @@ class _DemoLoginPageState extends State<DemoLoginPage> {
                 ),
               ],
             ),
-            backgroundColor: Colors.orange,
-            duration: const Duration(seconds: 4),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
+    }
+  }
+  
+  Future<void> _verifyTwoFactor() async {
+    if (_twoFactorCodeController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Por favor ingresa el código de autenticación'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    
+    final code = int.tryParse(_twoFactorCodeController.text.trim());
+    if (code == null || _twoFactorCodeController.text.trim().length != 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('El código debe ser un número de 6 dígitos'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    
+    setState(() {
+      _isLoading = true;
+    });
+    
+    try {
+      final verifyData = {
+        'usernameOrEmail': _storedUsername,
+        'password': _storedPassword,
+        'twoFactorCode': code,
+        'device': _storedDevice,
+        'ip': _storedIp,
+      };
+      
+      print('Verifying 2FA code: ${json.encode(verifyData)}');
+      
+      final response = await http.post(
+        Uri.parse('${ApiConstants.apiBaseUrl}/auth/verify-2fa'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: json.encode(verifyData),
+      ).timeout(const Duration(seconds: 10));
+      
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        
+        print('2FA Response status: ${response.statusCode}');
+        print('2FA Response body: ${response.body}');
+        
+        if (response.statusCode == 200) {
+          final responseData = json.decode(response.body);
+          
+          final accessToken = responseData['accessToken'];
+          
+          if (accessToken != null) {
+            AuthService.setAccessToken(accessToken);
+            
+            print('Permisos configurados: ${AuthService.permissions}');
+            print('Es admin: ${AuthService.isAdmin}');
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Autenticación exitosa - ${AuthService.username}',
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          );
+          
+          // Reset 2FA state
+          setState(() {
+            _requiresTwoFactor = false;
+            _twoFactorCodeController.clear();
+            _storedUsername = null;
+            _storedPassword = null;
+            _storedDevice = null;
+            _storedIp = null;
+          });
+          
+          Navigator.of(context).pushReplacementNamed('/demo');
+        } else {
+          String errorMessage = 'Código inválido';
+          
+          try {
+            final errorData = json.decode(response.body);
+            errorMessage = errorData['message'] ?? errorData['error'] ?? errorMessage;
+          } catch (e) {
+            errorMessage = 'Código de autenticación inválido';
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.error, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      errorMessage,
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.white),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Error de conexión: ${e.toString()}',
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
@@ -792,9 +999,56 @@ class _DemoLoginPageState extends State<DemoLoginPage> {
                         },
                       ),
                     ),
+                    
+                    // Campo de código 2FA (solo se muestra si se requiere)
+                    if (_requiresTwoFactor) ...[
+                      const SizedBox(height: 24),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: TextFormField(
+                          controller: _twoFactorCodeController,
+                          keyboardType: TextInputType.number,
+                          maxLength: 6,
+                          decoration: InputDecoration(
+                            labelText: 'Código de autenticación (6 dígitos)',
+                            hintText: '123456',
+                            prefixIcon: Icon(
+                              Icons.security,
+                              color: Colors.grey[500],
+                            ),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.all(16),
+                            labelStyle: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.black54,
+                            ),
+                            counterText: '',
+                          ),
+                          validator: (value) {
+                            if (_requiresTwoFactor && (value == null || value.isEmpty)) {
+                              return 'Por favor ingresa el código de autenticación';
+                            }
+                            if (_requiresTwoFactor && (value == null || value.length != 6)) {
+                              return 'El código debe tener 6 dígitos';
+                            }
+                            return null;
+                          },
+                        ),
+                      ),
+                    ],
+                    
                     const SizedBox(height: 32),
 
-                    // Botón de login
+                    // Botón de login o verificar 2FA
                     Container(
                       height: 56,
                       decoration: BoxDecoration(
@@ -813,7 +1067,9 @@ class _DemoLoginPageState extends State<DemoLoginPage> {
                         ],
                       ),
                       child: ElevatedButton(
-                        onPressed: _isLoading ? null : _handleLogin,
+                        onPressed: _isLoading 
+                            ? null 
+                            : (_requiresTwoFactor ? _verifyTwoFactor : _handleLogin),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.transparent,
                           shadowColor: Colors.transparent,
@@ -830,9 +1086,9 @@ class _DemoLoginPageState extends State<DemoLoginPage> {
                                   valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                 ),
                               )
-                            : const Text(
-                                'Iniciar Sesión',
-                                style: TextStyle(
+                            : Text(
+                                _requiresTwoFactor ? 'Verificar código' : 'Iniciar Sesión',
+                                style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 16,
                                   fontWeight: FontWeight.w600,

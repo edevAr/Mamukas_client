@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'core/utils/dependency_injection.dart' as di;
+import 'core/widgets/auth_guard.dart';
 import 'presentation/pages/demo_login_page.dart';
 import 'presentation/pages/ui_demo_page.dart';
 import 'presentation/pages/warehouse_management_page.dart';
@@ -88,10 +89,10 @@ class UIDemoApp extends StatelessWidget {
       themeMode: ThemeMode.system,
       home: const DemoLoginPage(),
       routes: {
-        '/demo': (context) => const UIDemoPage(),
-        '/warehouse': (context) => const WarehouseManagementPage(),
-        '/store': (context) => const StoreManagementPage(),
-        '/product': (context) => const ProductManagementPage(),
+        '/demo': (context) => const AuthGuard(child: UIDemoPage()),
+        '/warehouse': (context) => const AuthGuard(child: WarehouseManagementPage()),
+        '/store': (context) => const AuthGuard(child: StoreManagementPage()),
+        '/product': (context) => const AuthGuard(child: ProductManagementPage()),
       },
     );
   }

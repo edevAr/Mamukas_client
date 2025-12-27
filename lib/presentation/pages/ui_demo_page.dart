@@ -173,6 +173,20 @@ class _UIDemoPageState extends State<UIDemoPage> {
   @override
   void initState() {
     super.initState();
+    
+    // Verificación de seguridad: asegurar que el usuario esté autenticado
+    if (!AuthService.isAuthenticated || AuthService.isTokenExpired) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const DemoLoginPage()),
+            (route) => false, // Eliminar todas las rutas anteriores
+          );
+        }
+      });
+      return; // No cargar datos si no está autenticado
+    }
+    
     _loadProducts(page: 0, reset: true);
     _scrollController.addListener(_onScroll);
     _storeScrollController.addListener(_onStoreScroll);
@@ -6156,6 +6170,13 @@ class _UIDemoPageState extends State<UIDemoPage> {
             onTap: () {},
           ),
           _buildProfileOption(
+            icon: Icons.security,
+            title: 'Autenticación de Dos Factores (2FA)',
+            onTap: () {
+              _showTwoFactorAuthDialog();
+            },
+          ),
+          _buildProfileOption(
             icon: Icons.logout_outlined,
             title: 'Cerrar Sesión',
             onTap: () {
@@ -6452,6 +6473,16 @@ class _UIDemoPageState extends State<UIDemoPage> {
             ],
           ),
         );
+      },
+    );
+  }
+
+  void _showTwoFactorAuthDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext context) {
+        return _TwoFactorAuthDialog();
       },
     );
   }
@@ -7232,6 +7263,538 @@ class _UIDemoPageState extends State<UIDemoPage> {
               ),
             );
           },
+        );
+      },
+    );
+  }
+}
+
+// Widget para el diálogo de 2FA
+class _TwoFactorAuthDialog extends StatefulWidget {
+  @override
+  State<_TwoFactorAuthDialog> createState() => _TwoFactorAuthDialogState();
+}
+
+class _TwoFactorAuthDialogState extends State<_TwoFactorAuthDialog> {
+  bool _isLoading = false;
+  bool _isEnabled = false;
+  bool _isSettingUp = false;
+  String? _qrCodeUrl;
+  String? _secret;
+  final TextEditingController _codeController = TextEditingController();
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStatus();
+  }
+
+  @override
+  void dispose() {
+    _codeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadStatus() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final token = AuthService.accessToken;
+      if (token == null) {
+        throw Exception('No autenticado');
+      }
+
+      final response = await http.get(
+        Uri.parse('${ApiConstants.baseUrl}/api/2fa/status'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _isEnabled = data['data']?['enabled'] ?? false;
+        });
+      } else {
+        throw Exception('Error al cargar estado');
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error: ${e.toString()}';
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _setupTwoFactor() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final token = AuthService.accessToken;
+      if (token == null) {
+        throw Exception('No autenticado');
+      }
+
+      final response = await http.post(
+        Uri.parse('${ApiConstants.baseUrl}/api/2fa/setup'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _qrCodeUrl = data['data']?['qrCodeUrl'];
+          _secret = data['data']?['secret'];
+          _isSettingUp = true;
+        });
+      } else {
+        final error = json.decode(response.body);
+        throw Exception(error['message'] ?? 'Error al configurar 2FA');
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error: ${e.toString()}';
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _enableTwoFactor() async {
+    final code = int.tryParse(_codeController.text);
+    if (code == null || _codeController.text.length != 6) {
+      setState(() {
+        _errorMessage = 'Por favor ingresa un código de 6 dígitos';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final token = AuthService.accessToken;
+      if (token == null) {
+        throw Exception('No autenticado');
+      }
+
+      final response = await http.post(
+        Uri.parse('${ApiConstants.baseUrl}/api/2fa/enable'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({'code': code}),
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          _isEnabled = true;
+          _isSettingUp = false;
+          _qrCodeUrl = null;
+          _secret = null;
+          _codeController.clear();
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('2FA habilitado exitosamente'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        final error = json.decode(response.body);
+        throw Exception(error['message'] ?? 'Código inválido');
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error: ${e.toString()}';
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _disableTwoFactor() async {
+    final code = int.tryParse(_codeController.text);
+    if (code == null || _codeController.text.length != 6) {
+      setState(() {
+        _errorMessage = 'Por favor ingresa un código de 6 dígitos';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final token = AuthService.accessToken;
+      if (token == null) {
+        throw Exception('No autenticado');
+      }
+
+      final response = await http.post(
+        Uri.parse('${ApiConstants.baseUrl}/api/2fa/disable'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({'code': code}),
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          _isEnabled = false;
+          _codeController.clear();
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('2FA deshabilitado exitosamente'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      } else {
+        final error = json.decode(response.body);
+        throw Exception(error['message'] ?? 'Código inválido');
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error: ${e.toString()}';
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return StatefulBuilder(
+      builder: (context, setDialogState) {
+        void updateState(VoidCallback fn) {
+          setState(fn);
+          setDialogState(fn);
+        }
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              const Icon(
+                Icons.security,
+                color: Color(0xFF007AFF),
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'Autenticación de Dos Factores',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_isLoading && !_isSettingUp)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(20.0),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                else if (_isSettingUp && _qrCodeUrl != null) ...[
+                  const Text(
+                    'Escanea este código QR con tu aplicación de autenticación (Google Authenticator, Authy, etc.):',
+                    style: TextStyle(fontSize: 14, height: 1.4),
+                  ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Image.network(
+                        _qrCodeUrl!,
+                        width: 200,
+                        height: 200,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Column(
+                            children: [
+                              Icon(Icons.qr_code, size: 100),
+                              SizedBox(height: 8),
+                              Text('QR Code no disponible'),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  if (_secret != null) ...[
+                    const SizedBox(height: 16),
+                    const Text(
+                      'O ingresa este código manualmente:',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: SelectableText(
+                        _secret!,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Luego ingresa el código de 6 dígitos de tu aplicación:',
+                    style: TextStyle(fontSize: 14, height: 1.4),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _codeController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    decoration: InputDecoration(
+                      labelText: 'Código de verificación',
+                      hintText: '000000',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      counterText: '',
+                    ),
+                  ),
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _errorMessage!,
+                              style: const TextStyle(color: Colors.red, fontSize: 14),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ] else ...[
+                  Text(
+                    _isEnabled
+                        ? 'La autenticación de dos factores está habilitada para tu cuenta.'
+                        : 'La autenticación de dos factores añade una capa adicional de seguridad a tu cuenta.',
+                    style: const TextStyle(fontSize: 14, height: 1.4),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _isEnabled
+                          ? Colors.green.withOpacity(0.1)
+                          : Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _isEnabled ? Icons.check_circle : Icons.info_outline,
+                          color: _isEnabled ? Colors.green : Colors.orange,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _isEnabled
+                                ? '2FA está activo'
+                                : '2FA está desactivado',
+                            style: TextStyle(
+                              color: _isEnabled ? Colors.green : Colors.orange,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (!_isEnabled && !_isSettingUp) ...[
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Para habilitar 2FA, necesitarás una aplicación de autenticación como:',
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '• Google Authenticator\n• Microsoft Authenticator\n• Authy',
+                      style: TextStyle(fontSize: 13, height: 1.5),
+                    ),
+                  ],
+                  if (_isEnabled) ...[
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Para deshabilitar 2FA, ingresa el código de tu aplicación:',
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _codeController,
+                      keyboardType: TextInputType.number,
+                      maxLength: 6,
+                      decoration: InputDecoration(
+                        labelText: 'Código de verificación',
+                        hintText: '000000',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        counterText: '',
+                      ),
+                    ),
+                  ],
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _errorMessage!,
+                              style: const TextStyle(color: Colors.red, fontSize: 14),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: _isLoading
+                  ? null
+                  : () {
+                      Navigator.of(context).pop();
+                    },
+              child: Text(
+                'Cerrar',
+                style: TextStyle(
+                  color: isDark ? Colors.white70 : Colors.black54,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            if (!_isEnabled && !_isSettingUp)
+              TextButton(
+                onPressed: _isLoading
+                    ? null
+                    : () {
+                        _setupTwoFactor();
+                        setDialogState(() {});
+                      },
+                child: const Text(
+                  'Configurar 2FA',
+                  style: TextStyle(
+                    color: Color(0xFF007AFF),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            if (_isSettingUp && _qrCodeUrl != null)
+              TextButton(
+                onPressed: _isLoading
+                    ? null
+                    : () {
+                        _enableTwoFactor();
+                        setDialogState(() {});
+                      },
+                child: const Text(
+                  'Habilitar',
+                  style: TextStyle(
+                    color: Colors.green,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            if (_isEnabled)
+              TextButton(
+                onPressed: _isLoading
+                    ? null
+                    : () {
+                        _disableTwoFactor();
+                        setDialogState(() {});
+                      },
+                child: const Text(
+                  'Deshabilitar',
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
         );
       },
     );

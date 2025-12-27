@@ -1,6 +1,7 @@
 class ApiConstants {
   // Base URL de la API
   static const String baseUrl = 'https://mamukas-erp-backend-6x7b.onrender.com';
+  //static const String baseUrl = 'localhost:8080';
   
   // Endpoints base
   static const String apiBaseUrl = '$baseUrl/api';
