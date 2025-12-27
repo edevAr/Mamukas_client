@@ -57,7 +57,7 @@ jobs:
           fi
           
           echo "Building with base-href: $BASE_HREF"
-          flutter build web --release --base-href "$BASE_HREF" --dart-define=FLUTTER_WEB_USE_SKIA=false
+          flutter build web --release --base-href "$BASE_HREF" --dart-define=FLUTTER_WEB_USE_SKIA=false -t lib/ui_demo_main.dart
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
